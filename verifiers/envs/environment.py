@@ -475,7 +475,7 @@ class Environment(ABC):
                 else None
             )
 
-            async def run_one(i: int) -> None:
+            async def run_one(i: int) -> tuple[float, int]:
                 prompt_i = results.prompt[i]
                 answer_i = results.answer[i]
                 task_i = results.task[i]
@@ -534,6 +534,15 @@ class Environment(ABC):
                     if k not in metrics:
                         metrics[k] = [0.0] * n
                     metrics[k][i] = v
+
+                # Calculate token count from state responses
+                token_count = 0
+                if "responses" in state_i and state_i["responses"]:
+                    for response in state_i["responses"]:
+                        if hasattr(response, "usage") and response.usage:
+                            token_count += response.usage.completion_tokens or 0
+
+                return rs.reward, token_count
 
             tasks = [run_one(i) for i in range(n)]
 
