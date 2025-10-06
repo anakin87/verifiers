@@ -32,6 +32,7 @@ from verifiers.utils.message_utils import (
     get_overlong_prompt_dummy_response,
     sanitize_tool_calls,
 )
+from verifiers.utils.async_utils import gather_with_running_avg
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
@@ -535,10 +536,9 @@ class Environment(ABC):
                     metrics[k][i] = v
 
             tasks = [run_one(i) for i in range(n)]
-            from tqdm.asyncio import tqdm_asyncio
 
-            await tqdm_asyncio.gather(
-                *tasks, total=n, desc=f"Running {n} rollouts (interleaved)"
+            await gather_with_running_avg(
+                tasks, total=n, desc=f"Running {n} rollouts (interleaved)"
             )
 
             results.completion = results_completion  # type: ignore[assignment]
