@@ -29,7 +29,7 @@ async def gather_with_running_avg(tasks: list, total: int, desc: str) -> list:
         results[idx] = result = await task
         count += 1
 
-        print(result)
+        # print(result)
 
         if result is None:
             return
@@ -38,14 +38,20 @@ async def gather_with_running_avg(tasks: list, total: int, desc: str) -> list:
         if isinstance(result[0], (int, float)):
             sum_reward += result[0]
 
-        if isinstance(result[1], int):
-            sum_tokens += result[1]
+        # process state
+        state = result[1]
+        token_count = 0
+        if "responses" in state:
+            for response in state["responses"]:
+                if hasattr(response, "usage") and response.usage:
+                    token_count += response.usage.completion_tokens or 0
+        sum_tokens += token_count
 
         parts = [desc]
         if sum_reward:
             parts.append(f"avg_reward={sum_reward / count:.3f}")
         if sum_tokens:
-            parts.append(f"avg_len={sum_tokens / count:.0f}")
+            parts.append(f"completions_mean_length={sum_tokens / count:.0f}")
 
         if len(parts) > 1:
             pbar.set_description(" | ".join(parts))
