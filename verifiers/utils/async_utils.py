@@ -11,9 +11,13 @@ async def maybe_await(func: Callable, *args, **kwargs):
     return result
 
 
+# TODO: tests
+
+
 async def gather_with_running_avg(tasks: list, total: int, desc: str) -> list:
     """
-    Gather async tasks with tqdm progress bar showing running averages.
+    Gather async tasks with tqdm progress bar showing running averages
+    for reward and token count.
     """
     from tqdm.asyncio import tqdm as async_tqdm
 
@@ -29,23 +33,16 @@ async def gather_with_running_avg(tasks: list, total: int, desc: str) -> list:
         results[idx] = result = await task
         count += 1
 
-        # print(result)
-
-        if result is None:
-            return
-
-        # (reward, tokens) tuple from interleaved run_one()
-        if isinstance(result[0], (int, float)):
+        # we expect a tuple of (reward, state)
+        if result and len(result) >= 2:
             sum_reward += result[0]
 
-        # process state
-        state = result[1]
-        token_count = 0
-        if "responses" in state:
-            for response in state["responses"]:
-                if hasattr(response, "usage") and response.usage:
-                    token_count += response.usage.completion_tokens or 0
-        sum_tokens += token_count
+            # extract token count from state using OpenAI standard format
+            state = result[1]
+            if "responses" in state:
+                for response in state["responses"]:
+                    if hasattr(response, "usage") and response.usage:
+                        sum_tokens += response.usage.completion_tokens or 0
 
         parts = [desc]
         if sum_reward:
