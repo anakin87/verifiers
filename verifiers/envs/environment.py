@@ -32,7 +32,7 @@ from verifiers.utils.message_utils import (
     get_overlong_prompt_dummy_response,
     sanitize_tool_calls,
 )
-from verifiers.utils.async_utils import gather_with_running_avg
+from verifiers.utils.async_utils import tqdm_gather_with_metrics
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
@@ -539,7 +539,7 @@ class Environment(ABC):
 
             tasks = [run_one(i) for i in range(n)]
 
-            await gather_with_running_avg(
+            await tqdm_gather_with_metrics(
                 tasks, total=n, desc=f"Running {n} rollouts (interleaved)"
             )
 

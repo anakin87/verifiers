@@ -11,18 +11,15 @@ async def maybe_await(func: Callable, *args, **kwargs):
     return result
 
 
-# TODO: tests
-
-
-async def gather_with_running_avg(tasks: list, total: int, desc: str) -> list:
+async def tqdm_gather_with_metrics(tasks: list, total: int, desc: str) -> list:
     """
     Gather async tasks with tqdm progress bar showing running averages
-    for reward and token count.
+    for reward and completion token count.
     """
     from tqdm.asyncio import tqdm as async_tqdm
 
     results = [None] * total
-    pbar = async_tqdm(total=total, desc=desc)
+    progress_bar = async_tqdm(total=total, desc=desc)
 
     count = 0
     sum_reward = 0.0
@@ -34,7 +31,7 @@ async def gather_with_running_avg(tasks: list, total: int, desc: str) -> list:
         count += 1
 
         # we expect a tuple of (reward, state)
-        if result and len(result) >= 2:
+        if result and len(result) == 2:
             sum_reward += result[0]
 
             # extract token count from state using OpenAI standard format
@@ -44,16 +41,18 @@ async def gather_with_running_avg(tasks: list, total: int, desc: str) -> list:
                     if hasattr(response, "usage") and response.usage:
                         sum_tokens += response.usage.completion_tokens or 0
 
-        parts = [desc]
+        description_parts = [desc]
         if sum_reward:
-            parts.append(f"avg_reward={sum_reward / count:.3f}")
+            description_parts.append(f"avg_reward={sum_reward / count:.3f}")
         if sum_tokens:
-            parts.append(f"completions_mean_length={sum_tokens / count:.0f}")
+            description_parts.append(
+                f"completions_mean_length={sum_tokens / count:.0f}"
+            )
 
-        if len(parts) > 1:
-            pbar.set_description(" | ".join(parts))
-        pbar.update(1)
+        if len(description_parts) > 1:
+            progress_bar.set_description(" | ".join(description_parts))
+        progress_bar.update(1)
 
     await asyncio.gather(*[track(i, t) for i, t in enumerate(tasks)])
-    pbar.close()
+    progress_bar.close()
     return results
