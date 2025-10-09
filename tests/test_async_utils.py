@@ -53,12 +53,12 @@ async def test_tqdm_gather_with_metrics():
     assert len(set_desc_calls) == 2
 
     desc1 = set_desc_calls[0][0][0]
-    assert "avg_reward=0.800" in desc1
-    assert "completions_mean_length=10" in desc1
+    assert "reward=0.800" in desc1
+    assert "completion_length=10" in desc1
 
     desc2 = set_desc_calls[1][0][0]
-    assert "avg_reward=0.850" in desc2
-    assert "completions_mean_length=12" in desc2
+    assert "reward=0.850" in desc2
+    assert "completion_length=12" in desc2
 
 
 @pytest.mark.asyncio
@@ -66,8 +66,7 @@ async def test_tqdm_gather_with_metrics_missing_usage():
     class MockResponseNoUsage:
         """Mock response without usage field."""
 
-        def __init__(self):
-            pass
+        pass
 
     state = {"responses": [MockResponseNoUsage()]}
 

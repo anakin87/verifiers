@@ -43,11 +43,9 @@ async def tqdm_gather_with_metrics(tasks: list, total: int, desc: str) -> list:
 
         description_parts = [desc]
         if sum_reward:
-            description_parts.append(f"avg_reward={sum_reward / count:.3f}")
+            description_parts.append(f"reward={sum_reward / count:.3f}")
         if sum_tokens:
-            description_parts.append(
-                f"completions_mean_length={sum_tokens / count:.0f}"
-            )
+            description_parts.append(f"completion_length={sum_tokens / count:.0f}")
 
         if len(description_parts) > 1:
             progress_bar.set_description(" | ".join(description_parts))
