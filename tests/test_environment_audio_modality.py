@@ -72,7 +72,7 @@ async def test_sets_modalities_text_when_audio_and_missing():
     )
 
     await Environment.get_model_response(
-        fake_self,
+        fake_self,  # type: ignore[invalid-argument-type]
         client=client,
         model="gpt-4o-audio-preview",
         prompt=prompt,
@@ -106,7 +106,7 @@ async def test_does_not_override_existing_modalities():
     )
 
     await Environment.get_model_response(
-        fake_self,
+        fake_self,  # type: ignore[invalid-argument-type]
         client=client,
         model="gpt-4o-audio-preview",
         prompt=prompt,
@@ -129,7 +129,7 @@ async def test_does_not_add_modalities_when_no_audio():
     )
 
     await Environment.get_model_response(
-        fake_self,
+        fake_self,  # type: ignore[invalid-argument-type]
         client=client,
         model="gpt-4.1-mini",
         prompt=prompt,
