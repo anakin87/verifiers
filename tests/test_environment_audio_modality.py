@@ -1,6 +1,5 @@
 # tests/test_environment_audio_modalities.py
-import logging
-import types
+from unittest.mock import Mock
 
 import pytest
 
@@ -67,12 +66,12 @@ async def test_sets_modalities_text_when_audio_and_missing():
             ],
         }
     ]
-    fake_self = types.SimpleNamespace(
-        message_type="chat", logger=logging.getLogger("test")
-    )
+
+    mock_env = Mock(spec=Environment)
+    mock_env.message_type = "chat"
 
     await Environment.get_model_response(
-        fake_self,
+        mock_env,
         client=client,
         model="gpt-4o-audio-preview",
         prompt=prompt,
@@ -101,12 +100,11 @@ async def test_does_not_override_existing_modalities():
             ],
         }
     ]
-    fake_self = types.SimpleNamespace(
-        message_type="chat", logger=logging.getLogger("test")
-    )
+    mock_env = Mock(spec=Environment)
+    mock_env.message_type = "chat"
 
     await Environment.get_model_response(
-        fake_self,
+        mock_env,
         client=client,
         model="gpt-4o-audio-preview",
         prompt=prompt,
@@ -124,12 +122,12 @@ async def test_does_not_override_existing_modalities():
 async def test_does_not_add_modalities_when_no_audio():
     client, get_kwargs = _get_client_and_sink()
     prompt = [{"role": "user", "content": "hello"}]
-    fake_self = types.SimpleNamespace(
-        message_type="chat", logger=logging.getLogger("test")
-    )
+
+    mock_env = Mock(spec=Environment)
+    mock_env.message_type = "chat"
 
     await Environment.get_model_response(
-        fake_self,
+        mock_env,
         client=client,
         model="gpt-4.1-mini",
         prompt=prompt,
