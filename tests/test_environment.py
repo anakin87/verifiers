@@ -733,13 +733,9 @@ class TestEnvironmentBase:
             score_rollouts=True,
         )
 
-        assert results.metadata.time_ms > 0.0, "time_ms should be updated"
-        assert results.metadata.avg_reward == 0.75, (
-            "avg_reward should be (1.0*0.5 + 0.5*0.5)"
-        )
-        assert len(results.metadata.avg_metrics) == 2, (
-            "avg_metrics should have 2 entries"
-        )
+        assert results.metadata.time_ms > 0.0
+        assert results.metadata.avg_reward == 0.75
+        assert len(results.metadata.avg_metrics) == 2
         assert "reward_a" in results.metadata.avg_metrics
         assert "reward_b" in results.metadata.avg_metrics
         assert results.metadata.avg_metrics["reward_a"] == 1.0
