@@ -82,7 +82,7 @@ class RLConfig(TrainingArguments):
 
     # Parameters that control the training
     learning_rate: float = field(
-        default=1e-4,
+        default=3e-5,
         metadata={
             "help": "Initial learning rate for `AdamW` optimizer. The default value replaces that of "
             "`transformers.TrainingArguments`."
@@ -97,7 +97,7 @@ class RLConfig(TrainingArguments):
         metadata={"help": "Beta2 for `AdamW` optimizer."},
     )
     weight_decay: float = field(
-        default=0.01,
+        default=0.0,
         metadata={"help": "Weight decay for `AdamW` optimizer."},
     )
     mask_ratio_low: float = field(
