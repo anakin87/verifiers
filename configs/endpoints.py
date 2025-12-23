@@ -1,4 +1,9 @@
 ENDPOINTS = {
+    "qwen3-0.6": {
+        "model": "willcb/Qwen3-0.6B",
+        "url": "http://0.0.0.0:8080/v1",
+        "key": "DUMMY",
+    },
     "qwen3-4b-i": {
         "model": "Qwen/Qwen3-4B-Instruct-2507",
         "url": "http://0.0.0.0:8000/v1",
