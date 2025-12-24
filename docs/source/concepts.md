@@ -235,11 +235,12 @@ results = asyncio.run(env.evaluate(client=async_client, model="llama-3.1-8b"))
   ```
   - `rollouts_per_example > 1` repeats dataset entries internally.
   - `max_concurrent` throttles concurrent rollouts.
-  - `save_every` (when > 0) checkpoints intermediate progress during interleaved rollouts (set `interleave_scoring=True`).
+  - `save_every` (when > 0) checkpoints intermediate progress during rollouts.
 
 - **Scoring**:
-  - Each reward function returns a float. Weights applied inside `Rubric` combine them into `results.reward`.
-  - All individual scores are logged under `results.metrics` keyed by function name (even if weight is 0.0).
+  - Each reward function returns a float. Weights applied inside `Rubric` combine them into `state["reward"]`.
+  - All individual scores are logged under `state["metrics"]` keyed by function name (even if weight is 0.0).
+  - Scoring is performed at the group level by default, parallelizing across rollouts.
 
 - **Outputs** (`GenerateOutputs`):
   - `prompt`, `completion`, `answer`, `state`, `info`, `task`, `id`, `reward`, `metrics: dict[str, list[float]]`, plus a `metadata` block summarizing the run.

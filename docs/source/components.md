@@ -519,9 +519,12 @@ class WordleEnv(vf.MultiTurnEnv):
 Generate training data using environment rollouts:
 
 ```python
+import asyncio
+
 async def generate_training_data(env, client, model, num_samples=1000):
     """Generate diverse solutions for training."""
     results = []
+    score_sem = asyncio.Semaphore(1)  # Semaphore for scoring
     
     for i in range(num_samples):
         # Get a random prompt
@@ -530,25 +533,19 @@ async def generate_training_data(env, client, model, num_samples=1000):
         
         # Generate multiple solutions
         for temp in [0.3, 0.7, 1.0]:
-            completion, state = await env.rollout(
-                client=client,
-                model=model,
-                prompt=prompt,
-                answer=answer,
-                sampling_args={"temperature": temp, "max_tokens": 1000}
-            )
+            input = {"prompt": prompt, "answer": answer,
+                    "task": "default", "example_id": i}
+            state = await env.rollout(input=input, client=client, model=model, sampling_args={"temperature": temp, "max_tokens": 1000})
             
             # Score the solution
-            rewards = await env.rubric.score_rollout(
-                prompt, completion, answer, state
-            )
+            await env.rubric.score_rollout(state, score_sem)
             
             # Save high-quality solutions
-            if rewards["total"] > 0.8:
+            if state.get("reward") and state["reward"] > 0.8:
                 results.append({
                     "prompt": prompt,
-                    "completion": completion,
-                    "score": rewards["total"]
+                    "completion": state["completion"],
+                    "score": state["reward"]
                 })
     
     return Dataset.from_list(results)
