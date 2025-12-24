@@ -86,10 +86,9 @@ def minimax(board: list[str | None], is_maximizing: bool) -> tuple[float, int | 
 def get_preference_move(board: list[str | None], preference: list[int]) -> int:
     """Pick the first free cell according to a fixed preference order.
 
-    Why not random? GRPO compares multiple completions for the same prompt (a "group").
-    With a random opponent, the same model move could face different opponent responses, making reward comparisons
-    noisy. With a fixed preference order, identical model moves always get identical opponent responses within a group,
-    so reward differences reflect the model's choices, not randomness.
+    Why not random? Using a fixed order instead of random moves helps training: in GRPO-style group rollouts,
+    the same model move always faces the same opponent responses. This keeps reward comparisons
+    consistent and reduces noise, while still looking like a random opponent during evaluation.
     """
     free = set(get_free_positions(board=board))
     for pos in preference:
@@ -231,10 +230,11 @@ def load_environment(
         for _ in range(num_examples):
             board = [None] * 9
             is_optimal = random.random() < optimal_opponent_prob
-            # For non-optimal opponents, generate a fixed "preference order" instead of using random moves.
-            # This is critical for GRPO: all completions within a group (same sample) must face
-            # identical opponent behavior, so reward differences reflect model quality, not luck.
-            # Different samples get different preference orders, preserving variety across the dataset.
+            # For non-optimal opponents, create a fixed preference order instead of choosing randomly.
+            # This ensures that, during GRPO-style training, if the model makes the same move across multiple rollouts
+            # for the same example, the opponent will respond identically. This keeps reward comparisons meaningful
+            # and reduces noise from random opponent behavior.
+            # Across different examples, the preference order is randomized to preserve variety.
             preference = None if is_optimal else random.sample(range(9), 9)
 
             if random.random() < 0.5:
