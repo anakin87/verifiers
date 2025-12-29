@@ -502,11 +502,11 @@ class WordleEnv(vf.MultiTurnEnv):
         if guess == target:
             state["solved"] = True
             return [{"role": "user", "content": f"Correct! The word was {target}."}]
-        elif len(state["trajectory"]) >= self.max_guesses:
+        elif len(state["guesses"]) >= self.max_guesses:
             state["failed"] = True
             return [{"role": "user", "content": f"Out of guesses. The word was {target}."}]
         else:
-            remaining = self.max_guesses - len(state["trajectory"])
+            remaining = self.max_guesses - len(state["guesses"])
             return [{"role": "user", "content": f"{feedback}\n{remaining} guesses remaining."}]
     
     @vf.stop
