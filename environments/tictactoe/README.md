@@ -23,7 +23,7 @@ uv run vf-eval tictactoe
 Configure model and sampling:
 
 ```bash
-uv run vf-eval tictactoe   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"num_examples": 50, "optimal_opponent_prob": 0.8}'
+uv run vf-eval tictactoe   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"optimal_opponent_prob": 0.8}'
 ```
 
 Notes:
