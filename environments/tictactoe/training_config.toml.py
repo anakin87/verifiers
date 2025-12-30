@@ -1,3 +1,6 @@
+# EXAMPLE TRAINING CONFIG (rename it to training_config.toml)
+# Suitable for 2 x Nvidia A6000 (48 GB VRAM)
+
 model = "willcb/Qwen3-0.6B"
 
 [env]
@@ -30,10 +33,13 @@ batch_size = 64
 
 lora_rank = 4
 
-max_steps = 1000
-
 max_tokens = 512
-max_seq_len = 2048 # Sequence length: max tokens for full conversation (prompt + all turns)
+max_seq_len = (
+    2048  # Sequence length: max tokens for full conversation (prompt + all turns)
+)
+
+
+max_steps = 1000
 
 # Hub configuration
 # (https://huggingface.co/docs/transformers/v4.57.3/en/main_classes/trainer#transformers.TrainingArguments)
