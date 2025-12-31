@@ -1,12 +1,13 @@
 import random
-from typing import Any
+from functools import lru_cache
+from typing import Any, Sequence
 
 import verifiers as vf
 from datasets import Dataset
 from verifiers.types import Messages, State
 
 
-# GAME LOGIC
+# --- GAME LOGIC ---
 
 WINNING_LINES = [
     [0, 1, 2],
@@ -35,69 +36,67 @@ def render_board(board: list[str | None]) -> str:
     )
 
 
-def check_win(board: list[str | None], player: str) -> bool:
+def check_win(board: Sequence[str | None], player: str) -> bool:
     """Check if the given player has won."""
     return any(all(board[i] == player for i in line) for line in WINNING_LINES)
 
 
-def get_free_positions(board: list[str | None]) -> list[int]:
+def get_free_positions(board: Sequence[str | None]) -> list[int]:
     """Get list of empty positions on the board."""
     return [i for i in range(9) if board[i] is None]
 
 
-def get_optimal_move(board: list[str | None]) -> int:
-    """Find optimal move using minimax algorithm."""
-    _, move = minimax(board=board, is_maximizing=True)
-    assert move is not None  # Always valid when board has free cells
-    return move
+# --- STATELESS SEEDING ---
 
 
-def minimax(board: list[str | None], is_maximizing: bool) -> tuple[float, int | None]:
-    """Minimax algorithm. Returns (score, best_move) for the current player."""
-    # Terminal states
-    if check_win(board=board, player="O"):
-        return 1, None
-    if check_win(board=board, player="X"):
-        return -1, None
-    free = get_free_positions(board=board)
+def get_optimal_move(board: list[str | None], rng: random.Random) -> int:
+    """Find optimal move, using the passed RNG for tie-breaking."""
+    # Caller converts to tuple
+    _, best_moves = minimax(tuple(board), is_maximizing=True)
+    assert best_moves
+    return rng.choice(best_moves)
+
+
+@lru_cache(maxsize=None)
+def minimax(
+    board: tuple[str | None, ...], is_maximizing: bool
+) -> tuple[float, list[int]]:
+    """Pure minimax that returns score and all best moves, with memoization."""
+    if check_win(board, "O"):
+        return 1.0, []
+    if check_win(board, "X"):
+        return -1.0, []
+
+    free = get_free_positions(board)
     if not free:
-        return 0, None
+        return 0.0, []
 
     player = "O" if is_maximizing else "X"
-    best_score = -float("inf") if is_maximizing else float("inf")
-    best_move = free[0]
 
+    # Evaluate all possible moves
+    results = []
     for pos in free:
-        board[pos] = player
-        score, _ = minimax(board=board, is_maximizing=not is_maximizing)
-        board[pos] = None
+        # Caller converts to tuple for recursion
+        board_list = list(board)
+        board_list[pos] = player
+        score, _ = minimax(tuple(board_list), not is_maximizing)
+        results.append((score, pos))
 
-        if (
-            is_maximizing
-            and score > best_score
-            or not is_maximizing
-            and score < best_score
-        ):
-            best_score, best_move = score, pos
+    # Identify best score and all moves that reach it
+    scores = [res[0] for res in results]
+    best_score = max(scores) if is_maximizing else min(scores)
+    best_moves = [pos for score, pos in results if score == best_score]
 
-    return best_score, best_move
-
-
-def get_preference_move(board: list[str | None], preference: list[int]) -> int:
-    """Pick the first free cell according to a fixed preference order.
-
-    Why not random? Using a fixed order instead of random moves helps training: in GRPO-style group rollouts,
-    the same model move always faces the same opponent responses. This keeps reward comparisons
-    consistent and reduces noise, while still looking like a random opponent during evaluation.
-    """
-    free = set(get_free_positions(board=board))
-    for pos in preference:
-        if pos in free:
-            return pos
-    raise ValueError("No free positions")
+    return best_score, best_moves
 
 
-# VERIFIERS ENVIRONMENT
+def get_random_move(board: list[str | None], rng: random.Random) -> int:
+    """Pick a random valid move using the passed RNG."""
+    free = get_free_positions(board)
+    return rng.choice(free)
+
+
+# --- VERIFIERS ENVIRONMENT ---
 
 SYSTEM_PROMPT = f"""You are playing a game of Tic-Tac-Toe as X.
 Your opponent will play as O.
@@ -115,33 +114,31 @@ Your final answer must include the position you choose inside <move>...</move> t
 
 def user_feedback(status: str, board: list[str | None]) -> str:
     """Format consistent feedback to the model."""
-    free = get_free_positions(board=board)
-    return f"{status}\n\n{render_board(board=board)}\n\nAvailable positions: {free}\n\nYour turn."
+    free = get_free_positions(board)
+    return f"{status}\n\n{render_board(board)}\n\nAvailable positions: {free}\n\nYour turn."
 
 
 class TicTacToeEnv(vf.MultiTurnEnv):
     async def setup_state(self, state: State) -> State:
         info = state.get("info", {})
-        state["board"] = list(
-            info.get("initial_board")
-        )  # copy the board to avoid mutations
-        state["winner"] = None  # None=in progress, "X"/"O"=winner, "draw"=draw
-        state["opponent_is_optimal"] = info.get("opponent_is_optimal", False)
-        state["opponent_preference"] = info.get(
-            "opponent_preference"
-        )  # For non-optimal: deterministic preference order
+        state["board"] = list(info.get("initial_board"))
+        state["winner"] = None
+        state["opponent_randomness"] = info.get("opponent_randomness", 0.0)
+        state["example_seed"] = info.get("example_seed", 42)
         state["invalid_moves"] = 0
         state["next_response"] = None
         return state
 
     @vf.stop
     async def process_and_check_stop(self, state: State) -> bool:
-        """Process the model's move and check if game should stop.
+        """
+        Process the model's move and check if game should stop.
 
         This method both processes game logic and determines stopping.
 
         By processing here, we avoid generating a model response after game ends.
         """
+
         trajectory = state.get("trajectory", [])
         if not trajectory:
             return False  # No model response yet
@@ -163,26 +160,28 @@ class TicTacToeEnv(vf.MultiTurnEnv):
 
         # Apply model's move (X) and check for win
         board[pos] = "X"
-        if check_win(board=board, player="X"):
+        if check_win(board, "X"):
             state["winner"] = "X"
             return True
-        if not get_free_positions(board=board):
+        if not get_free_positions(board):
             state["winner"] = "draw"
             return True
 
-        # Opponent's move (O) and check for win
-        opp_pos = (
-            get_optimal_move(board=board)
-            if state["opponent_is_optimal"]
-            else get_preference_move(
-                board=board, preference=state["opponent_preference"]
-            )
-        )
+        # Opponent's move (O)
+        turn_seed = f"{state['example_seed']}_{state['board']}"
+        rng = random.Random(turn_seed)
+
+        if rng.random() < state["opponent_randomness"]:
+            opp_pos = get_random_move(board, rng)
+        else:
+            opp_pos = get_optimal_move(board, rng)
+
+        # Apply opponent's move (O) and check for win
         board[opp_pos] = "O"
-        if check_win(board=board, player="O"):
+        if check_win(board, "O"):
             state["winner"] = "O"
             return True
-        if not get_free_positions(board=board):
+        if not get_free_positions(board):
             state["winner"] = "draw"
             return True
 
@@ -208,41 +207,43 @@ def win_reward_func(state: State, **kwargs: Any) -> float:
     """Reward function: 1.0 for win, 0.5 for draw, 0.0 for loss/timeout."""
     winner = state.get("winner")
     if winner is None:
-        return 0.0  # Game didn't finish (timeout)
+        return 0.0
     return 1.0 if winner == "X" else 0.5 if winner == "draw" else 0.0
 
 
 def invalid_move_penalty_func(state: State, **kwargs: Any) -> float:
-    """Penalty for invalid moves: -0.1 per invalid move"""
-    invalid_moves = state.get("invalid_moves", 0)
-    return -0.1 * invalid_moves
+    """Penalty function: -0.1 per invalid move attempt."""
+    return -0.1 * state.get("invalid_moves", 0)
 
 
 def load_environment(
-    num_examples: int = 100,
-    optimal_opponent_prob: float = 0.5,
+    num_examples: int = 1000,
+    min_opponent_randomness: float = 0.0,
+    max_opponent_randomness: float = 0.4,
     use_think: bool = True,
     **kwargs,
 ) -> vf.Environment:
-    # Create dataset - each example has fixed opponent type and preference order
     def make_dataset():
         rows = []
         for _ in range(num_examples):
-            board = [None] * 9
-            is_optimal = random.random() < optimal_opponent_prob
-            # For non-optimal opponents, create a fixed preference order instead of choosing randomly.
-            # This ensures that, during GRPO-style training, if the model makes the same move across multiple rollouts
-            # for the same example, the opponent will respond identically. This keeps reward comparisons meaningful
-            # and reduces noise from random opponent behavior.
-            # Across different examples, the preference order is randomized to preserve variety.
-            preference = None if is_optimal else random.sample(range(9), 9)
+            board: list[str | None] = [None] * 9
+            opponent_randomness = random.uniform(
+                min_opponent_randomness, max_opponent_randomness
+            )
+            example_seed = random.randint(0, 1000000)
 
-            if random.random() < 0.5:
+            rng = random.Random(f"{example_seed}_{board}")
+
+            if rng.random() < 0.5:
                 # Model starts
                 question = user_feedback("Game started. You are X.", board)
             else:
-                # Opponent starts - optimal plays center, non-optimal uses preference order
-                opp_pos = 4 if is_optimal else preference[0]
+                # Opponent starts
+                if rng.random() < opponent_randomness:
+                    opp_pos = get_random_move(board, rng)
+                else:
+                    opp_pos = get_optimal_move(board, rng)
+
                 board[opp_pos] = "O"
                 question = user_feedback(
                     f"Game started. Opponent (O) played at position {opp_pos}.", board
@@ -253,19 +254,23 @@ def load_environment(
                     "question": question,
                     "info": {
                         "initial_board": board,
-                        "opponent_is_optimal": is_optimal,
-                        "opponent_preference": preference,
+                        "opponent_randomness": opponent_randomness,
+                        "example_seed": example_seed,
                     },
                 }
             )
         return Dataset.from_list(rows)
 
-    parser = (
-        vf.XMLParser(fields=["think", "move"], answer_field="move")
-        if use_think
-        else vf.XMLParser(fields=["move"], answer_field="move")
-    )
+    # Handle thinking and non-thinking models
+    move_parser = vf.XMLParser(fields=["move"], answer_field="move")
+
+    def extract_move(text: str) -> str:
+        return move_parser.parse_answer(text) or ""
+
+    parser = vf.ThinkParser(extract_fn=extract_move) if use_think else move_parser
+
     rubric = vf.Rubric(parser=parser, funcs=[win_reward_func])
+
     rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
     rubric.add_reward_func(invalid_move_penalty_func, weight=1.0)
 
