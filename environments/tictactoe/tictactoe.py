@@ -46,28 +46,24 @@ def get_free_positions(board: Sequence[str | None]) -> list[int]:
     return [i for i in range(9) if board[i] is None]
 
 
-# --- STATELESS SEEDING ---
-
-
-def get_optimal_move(board: list[str | None], rng: random.Random) -> int:
-    """Find optimal move, using the passed RNG for tie-breaking."""
-    # Caller converts to tuple
-    _, best_moves = minimax(tuple(board), is_maximizing=True)
-    assert best_moves
-    return rng.choice(best_moves)
-
-
 @lru_cache(maxsize=None)
 def minimax(
     board: tuple[str | None, ...], is_maximizing: bool
 ) -> tuple[float, list[int]]:
-    """Pure minimax that returns score and all best moves, with memoization."""
-    if check_win(board, "O"):
-        return 1.0, []
-    if check_win(board, "X"):
-        return -1.0, []
+    """Minimax that returns score and best moves, favoring efficiency.
 
+    Wins with more free squares (faster) are worth more.
+    Losses with fewer free squares (prolonged) are less negative.
+    """
     free = get_free_positions(board)
+
+    if check_win(board, "O"):
+        # Winning earlier (more free squares) is better
+        return 1.0 + len(free), []
+    if check_win(board, "X"):
+        # Losing later (fewer free squares) is better
+        return -1.0 - len(free), []
+
     if not free:
         return 0.0, []
 
@@ -76,7 +72,6 @@ def minimax(
     # Evaluate all possible moves
     results = []
     for pos in free:
-        # Caller converts to tuple for recursion
         board_list = list(board)
         board_list[pos] = player
         score, _ = minimax(tuple(board_list), not is_maximizing)
@@ -90,10 +85,15 @@ def minimax(
     return best_score, best_moves
 
 
-def get_random_move(board: list[str | None], rng: random.Random) -> int:
-    """Pick a random valid move using the passed RNG."""
-    free = get_free_positions(board)
-    return rng.choice(free)
+def get_opponent_move(
+    board: list[str | None], rng: random.Random, random_prob: float = 0.0
+) -> int:
+    """Pick opponent's move: random with probability random_prob, otherwise optimal."""
+    if rng.random() < random_prob:
+        return rng.choice(get_free_positions(board))
+    _, best_moves = minimax(tuple(board), is_maximizing=True)
+    assert best_moves
+    return rng.choice(best_moves)
 
 
 # --- VERIFIERS ENVIRONMENT ---
@@ -123,7 +123,7 @@ class TicTacToeEnv(vf.MultiTurnEnv):
         info = state.get("info", {})
         state["board"] = list(info.get("initial_board"))
         state["winner"] = None
-        state["opponent_randomness"] = info.get("opponent_randomness", 0.0)
+        state["random_move_prob"] = info.get("random_move_prob", 0.0)
         state["example_seed"] = info.get("example_seed", 42)
         state["invalid_moves"] = 0
         state["next_response"] = None
@@ -171,10 +171,7 @@ class TicTacToeEnv(vf.MultiTurnEnv):
         turn_seed = f"{state['example_seed']}_{state['board']}"
         rng = random.Random(turn_seed)
 
-        if rng.random() < state["opponent_randomness"]:
-            opp_pos = get_random_move(board, rng)
-        else:
-            opp_pos = get_optimal_move(board, rng)
+        opp_pos = get_opponent_move(board, rng, state["random_move_prob"])
 
         # Apply opponent's move (O) and check for win
         board[opp_pos] = "O"
@@ -211,15 +208,26 @@ def win_reward_func(state: State, **kwargs: Any) -> float:
     return 1.0 if winner == "X" else 0.5 if winner == "draw" else 0.0
 
 
+def speed_reward_func(state: State, **kwargs: Any) -> float:
+    """Reward for winning quickly: 0.1 per free square if X wins."""
+    if state.get("winner") != "X":
+        return 0.0
+    return 0.1 * len(get_free_positions(state["board"]))
+
+
 def invalid_move_penalty_func(state: State, **kwargs: Any) -> float:
-    """Penalty function: -0.1 per invalid move attempt."""
-    return -0.1 * state.get("invalid_moves", 0)
+    """
+    Flat penalty if any invalid move occurred.
+    Since we limit max_tokens and this leads to truncation, if we set a higher penalty, the model will be incentivized
+    to avoid thinking and this is not desired.
+    """
+    return -0.1 if state.get("invalid_moves", 0) > 0 else 0.0
 
 
 def load_environment(
     num_examples: int = 1000,
-    min_opponent_randomness: float = 0.0,
-    max_opponent_randomness: float = 0.4,
+    min_random_move_prob: float = 0.0,
+    max_random_move_prob: float = 1.0,
     use_think: bool = True,
     **kwargs,
 ) -> vf.Environment:
@@ -227,8 +235,8 @@ def load_environment(
         rows = []
         for _ in range(num_examples):
             board: list[str | None] = [None] * 9
-            opponent_randomness = random.uniform(
-                min_opponent_randomness, max_opponent_randomness
+            random_move_prob = random.uniform(
+                min_random_move_prob, max_random_move_prob
             )
             example_seed = random.randint(0, 1000000)
 
@@ -239,10 +247,7 @@ def load_environment(
                 question = user_feedback("Game started. You are X.", board)
             else:
                 # Opponent starts
-                if rng.random() < opponent_randomness:
-                    opp_pos = get_random_move(board, rng)
-                else:
-                    opp_pos = get_optimal_move(board, rng)
+                opp_pos = get_opponent_move(board, rng, random_move_prob)
 
                 board[opp_pos] = "O"
                 question = user_feedback(
@@ -254,7 +259,7 @@ def load_environment(
                     "question": question,
                     "info": {
                         "initial_board": board,
-                        "opponent_randomness": opponent_randomness,
+                        "random_move_prob": random_move_prob,
                         "example_seed": example_seed,
                     },
                 }
@@ -269,7 +274,7 @@ def load_environment(
 
     parser = vf.ThinkParser(extract_fn=extract_move) if use_think else move_parser
 
-    rubric = vf.Rubric(parser=parser, funcs=[win_reward_func])
+    rubric = vf.Rubric(parser=parser, funcs=[win_reward_func, speed_reward_func])
 
     rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
     rubric.add_reward_func(invalid_move_penalty_func, weight=1.0)
