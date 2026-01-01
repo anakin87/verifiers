@@ -7,11 +7,9 @@ model = "willcb/Qwen3-0.6B"
 id = "anakin87/tictactoe"
 
 [env.args]
-min_random_move_prob = 0.0
-max_random_move_prob = 1.0
+optimal_opponent_prob = 0.5
 use_think = true
-num_examples = 8000
-
+num_examples = 1000
 
 [inference]
 gpus = 1
@@ -46,7 +44,7 @@ max_steps = 1000
 # Hub configuration
 # (https://huggingface.co/docs/transformers/v4.57.3/en/main_classes/trainer#transformers.TrainingArguments)
 push_to_hub = true
-hub_model_id = "anakin87/qwen3-ttt-26"
+hub_model_id = "YOUR-MODEL-ID"
 hub_strategy = "every_save"
 save_strategy = "steps"
 save_steps = 10

@@ -1,10 +1,11 @@
 import random
+import re
 from functools import lru_cache
 from typing import Any, Sequence
 
 import verifiers as vf
 from datasets import Dataset
-from verifiers.types import Messages, State
+from verifiers.types import ChatMessage, Messages, State
 
 
 # --- GAME LOGIC ---
@@ -266,18 +267,35 @@ def load_environment(
             )
         return Dataset.from_list(rows)
 
-    # Handle thinking and non-thinking models
-    move_parser = vf.XMLParser(fields=["move"], answer_field="move")
+    # Simple parser: just extract <move> tag
+    parser = vf.XMLParser(fields=["move"], answer_field="move")
 
-    def extract_move(text: str) -> str:
-        return move_parser.parse_answer(text) or ""
+    # Format reward: requires <think>...</think><move>...</move> structure when use_think=True
+    format_pattern = re.compile(
+        r"<think>.*?</think>.*?<move>.*?</move>" if use_think else r"<move>.*?</move>",
+        re.DOTALL,
+    )
 
-    parser = vf.ThinkParser(extract_fn=extract_move) if use_think else move_parser
+    def format_reward_func(completion: list[ChatMessage], **kwargs: Any) -> float:
+        msgs = [m for m in completion if m.get("role") == "assistant"]
+        if not msgs:
+            return 0.0
+        scores = [
+            1.0 if format_pattern.search(str(m.get("content", ""))) else 0.0
+            for m in msgs
+        ]
+        return sum(scores) / len(scores)
 
-    rubric = vf.Rubric(parser=parser, funcs=[win_reward_func, speed_reward_func])
-
-    rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
-    rubric.add_reward_func(invalid_move_penalty_func, weight=1.0)
+    rubric = vf.Rubric(
+        parser=parser,
+        funcs=[
+            win_reward_func,
+            speed_reward_func,
+            format_reward_func,
+            invalid_move_penalty_func,
+        ],
+        weights=[1.0, 1.0, 0.2, 1.0],
+    )
 
     return TicTacToeEnv(
         dataset=make_dataset(),
