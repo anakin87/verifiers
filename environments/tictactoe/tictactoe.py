@@ -5,7 +5,7 @@ from typing import Any, Sequence
 
 import verifiers as vf
 from datasets import Dataset
-from verifiers.types import ChatMessage, Messages, State
+from verifiers.types import Messages, State
 
 
 # --- GAME LOGIC ---
@@ -149,6 +149,18 @@ class TicTacToeEnv(vf.MultiTurnEnv):
         move = self.parser.parse_answer(trajectory[-1]["completion"]) or ""
         free = get_free_positions(board)
 
+        if not move:
+            state["invalid_moves"] += 1
+            state["next_response"] = [
+                {
+                    "role": "user",
+                    "content": user_feedback(
+                        "Please provide a move inside <move>...</move> tags.", board
+                    ),
+                }
+            ]
+            return False
+
         # Validate move: must be one of the free positions
         if move not in [str(p) for p in free]:
             state["invalid_moves"] += 1
@@ -209,19 +221,8 @@ def win_reward_func(state: State, **kwargs: Any) -> float:
     return 1.0 if winner == "X" else 0.5 if winner == "draw" else 0.0
 
 
-def speed_reward_func(state: State, **kwargs: Any) -> float:
-    """Reward for winning quickly: 0.1 per free square if X wins."""
-    if state.get("winner") != "X":
-        return 0.0
-    return 0.1 * len(get_free_positions(state["board"]))
-
-
 def invalid_move_penalty_func(state: State, **kwargs: Any) -> float:
-    """
-    Flat penalty if any invalid move occurred.
-    Since we limit max_tokens and this leads to truncation, if we set a higher penalty, the model will be incentivized
-    to avoid thinking and this is not desired.
-    """
+    """Flat penalty if any invalid move occurred."""
     return -0.1 if state.get("invalid_moves", 0) > 0 else 0.0
 
 
@@ -230,6 +231,7 @@ def load_environment(
     min_random_move_prob: float = 0.0,
     max_random_move_prob: float = 1.0,
     use_think: bool = True,
+    max_turns: int = 8,
     **kwargs,
 ) -> vf.Environment:
     def make_dataset():
@@ -276,25 +278,26 @@ def load_environment(
         re.DOTALL,
     )
 
-    def format_reward_func(completion: list[ChatMessage], **kwargs: Any) -> float:
-        msgs = [m for m in completion if m.get("role") == "assistant"]
-        if not msgs:
+    def format_reward_func(state: State, **kwargs: Any) -> float:
+        trajectory = state.get("trajectory", [])
+        if not trajectory:
             return 0.0
-        scores = [
-            1.0 if format_pattern.search(str(m.get("content", ""))) else 0.0
-            for m in msgs
-        ]
+
+        scores = []
+        for step in trajectory:
+            content = str(step.get("completion", ""))
+            scores.append(1.0 if format_pattern.search(content) else 0.0)
+
         return sum(scores) / len(scores)
 
     rubric = vf.Rubric(
         parser=parser,
         funcs=[
             win_reward_func,
-            speed_reward_func,
             format_reward_func,
             invalid_move_penalty_func,
         ],
-        weights=[1.0, 1.0, 0.2, 1.0],
+        weights=[1.0, 0.2, 1.0],
     )
 
     return TicTacToeEnv(
@@ -302,6 +305,6 @@ def load_environment(
         system_prompt=SYSTEM_PROMPT,
         parser=parser,
         rubric=rubric,
-        max_turns=10,
+        max_turns=max_turns,
         **kwargs,
     )
