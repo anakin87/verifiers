@@ -1,6 +1,36 @@
-# Environments
+# environments/AGENTS.md
 
 This section walks through building environments in Verifiers, from simple single-turn tasks to complex multi-turn agents with tools. See [Overview](overview.md) for how to initialize a new environment template.
+
+## Table of Contents
+- [Your First Environment](#your-first-environment)
+- [Datasets](#datasets)
+  - [Building the Prompt](#building-the-prompt)
+  - [Evaluation Datasets](#evaluation-datasets)
+- [Rubrics](#rubrics)
+  - [Reward Functions](#reward-functions)
+  - [Multiple Reward Functions](#multiple-reward-functions)
+  - [Execution Order and State](#execution-order-and-state)
+  - [Group-Based Reward Functions](#group-based-reward-functions)
+  - [Shared Objects](#shared-objects)
+  - [Rubric Groups](#rubric-groups)
+  - [Metrics and Monitor Rubrics](#metrics-and-monitor-rubrics)
+- [Tool Environments](#tool-environments)
+  - [MCP Tool Environments](#mcp-tool-environments)
+  - [Stateful Tool Environments](#stateful-tool-environments)
+- [Custom Multi-Turn Environments](#custom-multi-turn-environments)
+  - [The Rollout Loop](#the-rollout-loop)
+  - [Stop Conditions](#stop-conditions)
+  - [Error Handling](#error-handling)
+  - [State Initialization](#state-initialization)
+  - [Cleanup and Teardown](#cleanup-and-teardown)
+  - [Signaling Early Termination](#signaling-early-termination)
+- [Developing Environments](#developing-environments)
+  - [pyproject.toml](#pyprojecttoml)
+  - [Managing Dependencies](#managing-dependencies)
+  - [Installation](#installation)
+- [Environment Groups](#environment-groups)
+- [Integrations and Experimental Environments](#integrations-and-experimental-environments)
 
 ## Your First Environment
 
@@ -291,6 +321,38 @@ rubric = vf.RubricGroup([math_rubric, judge_rubric])
 
 All rubrics in a group are executed in parallel, and the final reward is the sum of all rubric rewards. Metrics from all rubrics are collected together.
 
+### Metrics and Monitor Rubrics
+
+For simple cases, metrics can be added directly to a rubric via `add_metric()` as shown above. Monitor rubrics extend this pattern by packaging metrics into separate rubrics that are combined via `add_rubric()`. This allows each environment type in a class hierarchy to contribute its own metrics automatically.
+
+Many environment types automatically include a monitor rubric that tracks metrics specific to their level of the environment class hierarchy:
+
+| Environment | Tracked Metrics |
+|-------------|-----------------|
+| `MultiTurnEnv` | `num_turns` |
+| `ToolEnv` | `total_tool_calls`, per-tool counts |
+| `SandboxEnv` | `sandbox_ready_wait_time`, `sandbox_command_execution_time` |
+| `PythonEnv` | `python_ready_wait_time` |
+
+These metrics appear automatically in rollout results alongside any custom reward functions.
+
+To add custom metrics to an environment, define a monitor rubric class and add it via `add_rubric()`:
+
+```python
+class MyMonitorRubric(vf.Rubric):
+    def __init__(self):
+        super().__init__()
+        self.add_metric(self.custom_metric)
+    
+    async def custom_metric(self, state: vf.State) -> float:
+        return len(state["trajectory"])
+
+env = vf.ToolEnv(dataset=dataset, tools=tools, rubric=rubric)
+env.add_rubric(MyMonitorRubric())
+```
+
+The environment automatically wraps rubrics in a `RubricGroup` as needed, so monitor rubrics stack up the class hierarchy—`PythonEnv` inherits metrics from both `SandboxEnv` and `ToolEnv`.
+
 ## Tool Environments
 
 All currently-supported environment types in Verifiers are built on `MultiTurnEnv`, which implements the core single-agent rollout loop (even `SingleTurnEnv` is simply a `MultiTurnEnv` with `max_turns=1` and a placeholder `env_response` method). `ToolEnv` adds tool calling to this foundation.
@@ -339,16 +401,7 @@ vf_env = vf.ToolEnv(
 )
 ```
 
-During rollouts, the model can call tools, receive results, and continue reasoning until it produces a response without tool calls (or hits `max_turns`). Each turn consists of a model response followed by the environment's tool execution.
-
-
-Tool usage can be tracked using the built-in `ToolRubric`, which provides metrics for counting individual and total tool calls, and can be added to a `RubricGroup` to combine with other reward functions:
-
-```python
-main_rubric = vf.Rubric(funcs=[my_correctness_check])   
-tool_rubric = vf.ToolRubric(tools=[calculate, lookup])
-rubric = vf.RubricGroup([main_rubric, tool_rubric])
-```
+During rollouts, the model can call tools, receive results, and continue reasoning until it produces a response without tool calls (or hits `max_turns`). Each turn consists of a model response followed by the environment's tool execution. Tool call counts are tracked automatically via monitor rubrics (see above).
 
 ### MCP Tool Environments
 
@@ -551,6 +604,96 @@ async def env_response(self, messages: vf.Messages, state: vf.State) -> vf.Messa
     # ... normal response logic
 ```
 This bypasses the normal model response loop and immediately terminates the rollout, which is useful when the environment response itself signals completion (e.g. a game is won, an answer is submitted) or is required for reward computation (e.g. final feedback or tool results).
+
+## Developing Environments
+
+Environments are packaged as installable Python projects. We recommend developing environments in a workspace with `environments/` and `configs/` folders. The `vf-setup` command initializes this structure:
+
+```bash
+vf-setup
+```
+
+The `vf-init` command initializes a new environment project:
+
+```bash
+vf-init my-env
+```
+
+This creates the following structure:
+
+```
+environments/my_env/
+├── my_env.py          # environment implementation
+├── pyproject.toml     # package metadata and dependencies
+└── README.md          # documentation template
+```
+
+The environment file must export a `load_environment()` function that returns a `vf.Environment`. Explicitly declare any arguments your environment accepts:
+
+```python
+import verifiers as vf
+
+def load_environment(difficulty: str = "easy", num_examples: int = -1) -> vf.Environment:
+    # build dataset, rubric, etc.
+    return vf.SingleTurnEnv(dataset=dataset, rubric=rubric)
+```
+
+### pyproject.toml
+
+The `pyproject.toml` defines package metadata, dependencies, and evaluation defaults:
+
+```toml
+[project]
+name = "my-env"
+description = "My custom environment"
+tags = ["single-turn", "math", "train", "eval"]
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "verifiers>=0.1.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["my_env.py", "pyproject.toml"]
+
+[tool.verifiers.eval]
+num_examples = 20
+rollouts_per_example = 5
+```
+
+Key `pyproject.toml` sections:
+
+- **`[project]`** — Package name (used by `vf-install` and `vf-eval`), description, version, and dependencies. The `tags` field is optional metadata for categorizing environments.
+- **`[build-system]`** — Hatchling is used as the build backend for the Environments Hub.
+- **`[tool.hatch.build]`** — Lists files to include in the package. Always include `pyproject.toml` alongside your environment file to ensure that environment metadata is available when the environment is installed. Add any additional source files here.
+- **`[tool.verifiers.eval]`** — Default parameters for `vf-eval` when flags aren't provided.
+
+### Managing Dependencies
+
+All packages your environment needs must be declared in the `dependencies` array. Always include `verifiers` with a minimum version. If your environment uses additional libraries, add them here—they will be installed automatically when the environment is installed:
+
+```toml
+dependencies = [
+    "verifiers>=0.1.8",
+    "chromadb",
+    "nltk>=3.9.2",
+]
+```
+
+### Installation
+
+Install a local environment with `vf-install`:
+
+```bash
+vf-install my-env                    # from ./environments/my_env
+vf-install my-env -p /path/to/environments   # custom path
+```
+
+This runs `uv pip install -e` for local environments, making them importable by `vf-eval` and other integrations.
 
 ## Environment Groups
 
