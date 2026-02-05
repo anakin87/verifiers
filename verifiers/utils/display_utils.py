@@ -166,6 +166,10 @@ class BaseDisplay:
         if self._live:
             self._live.update(self._render())
 
+    def get_log_hint(self) -> Text | None:
+        """Return an optional hint for viewing full logs."""
+        return Text("full logs: --debug", style="dim")
+
     def _make_log_panel(self) -> Panel:
         """Create a panel showing recent log messages with placeholder lines."""
         max_lines = self._log_handler.logs.maxlen or 3
@@ -181,7 +185,16 @@ class BaseDisplay:
             else:
                 log_text.append(" ", style="dim")  # placeholder line
 
-        return Panel(log_text, title="[dim]Logs[/dim]", border_style="dim")
+        subtitle = self.get_log_hint()
+        if subtitle is None:
+            return Panel(log_text, title="[dim]Logs[/dim]", border_style="dim")
+        return Panel(
+            log_text,
+            title="[dim]Logs[/dim]",
+            subtitle=subtitle,
+            subtitle_align="center",
+            border_style="dim",
+        )
 
     def start(self) -> None:
         """Start the live display."""
