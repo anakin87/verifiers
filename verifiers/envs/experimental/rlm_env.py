@@ -28,6 +28,7 @@ import logging
 import os
 import pickle
 import random
+import re
 import shutil
 import signal
 import shlex
@@ -2088,8 +2089,35 @@ class SandboxRLMExecutor(BaseRLMExecutor, SandboxExecutorMixin):
         packages.extend(extras)
         if not packages:
             return
-        pkg_list = " ".join(packages)
-        cmd = f"bash -lc 'pip install -q {pkg_list}'"
+        # Check each package with a quick import and only
+        # install the ones that are missing. This avoids failures when pip is
+        # unavailable on PATH but the package is already present in the image.
+        # For example, in mini-swe-agent-plus-rlm
+        missing: list[str] = []
+        for pkg in packages:
+            name = pkg.strip()
+            name = name.split("@", 1)[0].strip()
+            name = name.split("[", 1)[0].strip()
+            # Strip version constraints (e.g., "numpy>1.20,<2.0") at the first specifier.
+            name = re.split(r"[<>=!~]", name, 1)[0].strip()
+            module = name.replace("-", "_")
+            check_cmd = f"bash -lc 'python -c \"import {module}\"'"
+            try:
+                result = await self._execute_sandbox_command(
+                    sandbox_id,
+                    check_cmd,
+                    timeout=self.env.max_startup_wait_seconds,
+                )
+            except Exception:
+                missing.append(pkg)
+                continue
+            exit_code = getattr(result, "exit_code", 0)
+            if exit_code not in (0, None):
+                missing.append(pkg)
+        if not missing:
+            return
+        pkg_list = " ".join(missing)
+        cmd = f"bash -lc 'python -m pip install -q {pkg_list}'"
         result = await self._execute_sandbox_command(
             sandbox_id,
             cmd,
@@ -3617,82 +3645,102 @@ class RLMEnv(vf.StatefulToolEnv):
                 "include_sub_llm_in_trajectory=True. Use branched rollouts instead."
             )
 
-        # 1. Setup interception and register rollout
-        state = await self._setup_interception_and_register(state, rollout_id)
+        try:
+            # 1. Setup interception and register rollout
+            state = await self._setup_interception_and_register(state, rollout_id)
 
-        # 2. Create rollout directories
-        self._executor.create_rollout_dirs(state)
+            # 2. Create rollout directories
+            self._executor.create_rollout_dirs(state)
 
-        # 3. Build filesystem context
-        info = state.get("info") or {}
-        if not isinstance(info, dict):
-            info = {}
-        fs_root = state.get("rlm_fs_root")
-        if not fs_root:
-            raise ValueError("RLM filesystem root not initialized")
-        fs_has_data = False
-        fs_source: str | None = None
+            # 3. Build filesystem context
+            info = state.get("info") or {}
+            if not isinstance(info, dict):
+                info = {}
+            fs_root = state.get("rlm_fs_root")
+            if not fs_root:
+                raise ValueError("RLM filesystem root not initialized")
+            fs_has_data = False
+            fs_source: str | None = None
 
-        context_dir = info.get(self.context_dir_key)
-        if context_dir:
-            fs_source = str(context_dir)
-            self._copy_context_directory(fs_source, fs_root)
-            fs_has_data = True
-        else:
-            context_data = info.get(self.context_key, None)
-            if context_data is not None:
+            context_dir = info.get(self.context_dir_key)
+            if context_dir:
+                fs_source = str(context_dir)
+                self._copy_context_directory(fs_source, fs_root)
                 fs_has_data = True
-                self._write_builtin_context(context_data, fs_root)
+            else:
+                context_data = info.get(self.context_key, None)
+                if context_data is not None:
+                    fs_has_data = True
+                    self._write_builtin_context(context_data, fs_root)
 
-        state["rlm_fs_root"] = fs_root
-        state["rlm_fs_source"] = fs_source
-        state["rlm_fs_has_data"] = fs_has_data
-        state["retain_filesystem_after_rollout"] = self.retain_filesystem_after_rollout
-        if self.custom_system_prompt:
-            base_system_prompt = self.custom_system_prompt
-        elif self.repl_language == "bash":
-            base_system_prompt = _RLM_BASH_SYSTEM_PROMPT_STORE[
-                self.root_prompt_verbosity
+            state["rlm_fs_root"] = fs_root
+            state["rlm_fs_source"] = fs_source
+            state["rlm_fs_has_data"] = fs_has_data
+            state["retain_filesystem_after_rollout"] = (
+                self.retain_filesystem_after_rollout
+            )
+            if self.custom_system_prompt:
+                base_system_prompt = self.custom_system_prompt
+            elif self.repl_language == "bash":
+                base_system_prompt = _RLM_BASH_SYSTEM_PROMPT_STORE[
+                    self.root_prompt_verbosity
+                ]
+            else:
+                base_system_prompt = _RLM_PYTHON_SYSTEM_PROMPT_STORE[
+                    self.root_prompt_verbosity
+                ]
+
+            packages_docs = self._generate_packages_documentation()
+            root_tools_docs = self._generate_root_tools_documentation()
+            sub_tools_docs = self._generate_sub_tools_documentation()
+            state["rlm_system_prompt"] = (
+                base_system_prompt + packages_docs + root_tools_docs + sub_tools_docs
+            )
+            state["rlm_packages_docs"] = packages_docs
+            state["rlm_root_tools_docs"] = root_tools_docs
+            state["rlm_sub_tools_docs"] = sub_tools_docs
+            deduped_shared, _ = _dedupe_tools(
+                self.shared_tools, context="shared tools", reserved_names=set()
+            )
+            state["rlm_shared_tools"] = [
+                _tool_display_name(tool) for tool in deduped_shared
             ]
-        else:
-            base_system_prompt = _RLM_PYTHON_SYSTEM_PROMPT_STORE[
-                self.root_prompt_verbosity
+            state["rlm_root_tools"] = [
+                _tool_display_name(tool) for tool in self.root_tools
+            ]
+            state["rlm_sub_tools"] = [
+                _tool_display_name(tool) for tool in self.sub_tools
             ]
 
-        packages_docs = self._generate_packages_documentation()
-        root_tools_docs = self._generate_root_tools_documentation()
-        sub_tools_docs = self._generate_sub_tools_documentation()
-        state["rlm_system_prompt"] = (
-            base_system_prompt + packages_docs + root_tools_docs + sub_tools_docs
-        )
-        state["rlm_packages_docs"] = packages_docs
-        state["rlm_root_tools_docs"] = root_tools_docs
-        state["rlm_sub_tools_docs"] = sub_tools_docs
-        deduped_shared, _ = _dedupe_tools(
-            self.shared_tools, context="shared tools", reserved_names=set()
-        )
-        state["rlm_shared_tools"] = [
-            _tool_display_name(tool) for tool in deduped_shared
-        ]
-        state["rlm_root_tools"] = [_tool_display_name(tool) for tool in self.root_tools]
-        state["rlm_sub_tools"] = [_tool_display_name(tool) for tool in self.sub_tools]
-
-        # 4. Prepare backend and start worker (defer for sandbox to allow env setup)
-        if self.execution_backend != "sandbox":
+            # 4. Prepare backend and start worker (always eager)
+            await self._executor.prepare_filesystem(state)
             await self._executor.setup(state)
             state["rlm_worker_ready"] = True
-        else:
-            state["rlm_worker_ready"] = False
 
-        # Initialize context warning flag (feature enabled if max_seq_len is set)
-        state["context_warning_sent"] = False
+            # Initialize context warning flag (feature enabled if max_seq_len is set)
+            state["context_warning_sent"] = False
 
-        # Initialize FIFO sequence counter for detecting stale responses
-        state["_exec_seq"] = 0
+            # Initialize FIFO sequence counter for detecting stale responses
+            state["_exec_seq"] = 0
 
-        _ensure_rlm_metric_state(state)
+            _ensure_rlm_metric_state(state)
 
-        return state
+            return state
+        except Exception:
+            # Best-effort cleanup to avoid leaking tunnels/sandboxes on setup failure.
+            if rollout_id in self.active_rollouts:
+                del self.active_rollouts[rollout_id]
+            try:
+                await self._executor.cleanup(state)
+            except Exception:
+                logger.exception("Failed to cleanup RLM executor after setup error")
+            if not self.active_rollouts:
+                try:
+                    await self._teardown_interception_server()
+                finally:
+                    if self.execution_backend == "sandbox":
+                        await self._teardown_tunnel()
+            raise
 
     # =========================================================================
     # Code Execution
