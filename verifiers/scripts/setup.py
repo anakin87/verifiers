@@ -18,13 +18,13 @@ PRIME_RL_INSTALL_SCRIPT_REF = (
 ENDPOINTS_SRC = f"https://raw.githubusercontent.com/{VERIFIERS_REPO}/refs/heads/{VERIFIERS_COMMIT}/configs/endpoints.toml"
 ENDPOINTS_DST = "configs/endpoints.toml"
 
-AGENTS_MD_SRC = f"https://raw.githubusercontent.com/{VERIFIERS_REPO}/refs/heads/{VERIFIERS_COMMIT}/AGENTS.md"
+AGENTS_MD_SRC = f"https://raw.githubusercontent.com/{VERIFIERS_REPO}/refs/heads/{VERIFIERS_COMMIT}/assets/lab/AGENTS.md"
 AGENTS_MD_DST = "AGENTS.md"
 
-CLAUDE_MD_SRC = f"https://raw.githubusercontent.com/{VERIFIERS_REPO}/refs/heads/{VERIFIERS_COMMIT}/CLAUDE.md"
+CLAUDE_MD_SRC = f"https://raw.githubusercontent.com/{VERIFIERS_REPO}/refs/heads/{VERIFIERS_COMMIT}/assets/lab/CLAUDE.md"
 CLAUDE_MD_DST = "CLAUDE.md"
 
-ENVS_AGENTS_MD_SRC = f"https://raw.githubusercontent.com/{VERIFIERS_REPO}/refs/heads/{VERIFIERS_COMMIT}/environments/AGENTS.md"
+ENVS_AGENTS_MD_SRC = f"https://raw.githubusercontent.com/{VERIFIERS_REPO}/refs/heads/{VERIFIERS_COMMIT}/assets/lab/environments/AGENTS.md"
 ENVS_AGENTS_MD_DST = "environments/AGENTS.md"
 
 ConfigSpec = tuple[str, str, str]
