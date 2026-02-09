@@ -73,8 +73,12 @@ prime lab setup
 This sets up a Python project if needed (with `uv init`), installs `verifiers` (with `uv add verifiers`), creates the recommended workspace structure, and downloads useful starter files:
 ```
 configs/
-├── endpoints.py        # OpenAI-compatible API endpoint configuration
-└── lab/                # Example configs for Hosted Training
+├── endpoints.toml      # OpenAI-compatible API endpoint configuration
+├── rl/                 # Example configs for Hosted Training
+├── eval/               # Example multi-environment eval configs
+└── gepa/               # Example configs for prompt optimization
+.prime/
+└── skills/             # Bundled workflow skills for create/browse/review/eval/GEPA/train/brainstorm
 environments/
 └── AGENTS.md           # Documentation for AI coding agents
 AGENTS.md               # Top-level documentation for AI coding agents
@@ -89,6 +93,14 @@ uv add verifiers && prime lab setup --skip-install
 Environments built with Verifiers are self-contained Python modules. To initialize a fresh environment template, do:
 ```bash
 prime env init my-env # creates a new template in ./environments/my_env
+```
+For OpenEnv integration, use:
+```bash
+prime env init my-openenv --openenv
+```
+Then copy your OpenEnv project into `environments/my_openenv/proj/` and build the image with:
+```bash
+uv run vf-build my-openenv
 ```
 
 This will create a new module called `my_env` with a basic environment template.
@@ -128,7 +140,7 @@ To run a local evaluation with any OpenAI-compatible model, do:
 ```bash
 prime eval run my-env -m openai/gpt-5-nano # run and save eval results locally
 ```
-Evaluations use [Prime Inference](https://docs.primeintellect.ai/inference/overview) by default; configure your own API endpoints in `./configs/endpoints.py`.
+Evaluations use [Prime Inference](https://docs.primeintellect.ai/inference/overview) by default; configure your own API endpoints in `./configs/endpoints.toml`.
 
 View local evaluation results in the terminal UI:
 ```bash

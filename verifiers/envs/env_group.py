@@ -1,14 +1,16 @@
-import time
-from typing import TYPE_CHECKING, AsyncContextManager, Mapping, final
+from __future__ import annotations
 
-from datasets import Dataset, concatenate_datasets
+import time
+from typing import TYPE_CHECKING, Mapping, final
+
 from openai import AsyncOpenAI
 
 import verifiers as vf
-from verifiers.types import RolloutInput, SamplingArgs
+from verifiers.types import ClientConfig, RolloutInput, SamplingArgs
+from verifiers.workers.client.env_client import EnvClient
 
 if TYPE_CHECKING:
-    pass
+    from datasets import Dataset
 
 
 class EnvGroupRubric(vf.Rubric):
@@ -37,7 +39,6 @@ class EnvGroupRubric(vf.Rubric):
     async def score_rollout(
         self,
         state: vf.State,
-        score_sem: AsyncContextManager,
     ) -> None:
         """
         Evaluate all reward functions in-place for a single rollout.
@@ -56,7 +57,7 @@ class EnvGroupRubric(vf.Rubric):
             state["metrics"] = metrics
             return
 
-        await env.rubric.score_rollout(state, score_sem=score_sem)
+        await env.rubric.score_rollout(state)
         env_reward = state.get("reward", 0.0)
         env_metrics = state.get("metrics", {}).copy() if state.get("metrics") else {}
 
@@ -71,7 +72,6 @@ class EnvGroupRubric(vf.Rubric):
     async def score_group(
         self,
         states: list[vf.State],
-        score_sem: AsyncContextManager,
     ) -> None:
         """
         Score a group of rollouts, routing to appropriate environment rubrics based on task.
@@ -94,7 +94,7 @@ class EnvGroupRubric(vf.Rubric):
             return
 
         # Score all states using the environment's rubric
-        await env.rubric.score_group(states, score_sem=score_sem)
+        await env.rubric.score_group(states)
 
         # Initialize metrics dict with all reward function names
         aggregated_metrics: dict[str, list[float]] = {
@@ -142,6 +142,8 @@ class EnvGroup(vf.Environment):
                       If not provided, uses "env_0", "env_1", etc.
             **kwargs: Additional arguments passed to parent Environment
         """
+        from datasets import concatenate_datasets
+
         if not envs:
             raise ValueError("EnvGroup requires at least one environment")
 
@@ -261,6 +263,46 @@ class EnvGroup(vf.Environment):
             "Task column should be set during concatenation in __init__"
         )
         return dataset
+
+    @final
+    async def run_rollout(  # type: ignore[override]
+        self,
+        input: RolloutInput,
+        client: AsyncOpenAI | ClientConfig,
+        model: str,
+        sampling_args: SamplingArgs,
+        max_retries: int = 0,
+        state_columns: list[str] | None = None,
+        env_client: EnvClient | None = None,
+    ) -> vf.RolloutOutput:
+        env = self.get_env_for_task(input["task"])
+        env_client = env_client or env.env_client or self.env_client
+        return await env.run_rollout(
+            input, client, model, sampling_args, max_retries, state_columns, env_client
+        )
+
+    @final
+    async def run_group(  # type: ignore[override]
+        self,
+        group_inputs: list[RolloutInput],
+        client: AsyncOpenAI | ClientConfig,
+        model: str,
+        sampling_args: SamplingArgs,
+        max_retries: int = 0,
+        state_columns: list[str] | None = None,
+        env_client: EnvClient | None = None,
+    ) -> list[vf.RolloutOutput]:
+        env = self.get_env_for_task(group_inputs[0]["task"])
+        env_client = env_client or env.env_client or self.env_client
+        return await env.run_group(
+            group_inputs,
+            client,
+            model,
+            sampling_args,
+            max_retries,
+            state_columns,
+            env_client,
+        )
 
     @final
     async def rollout(
