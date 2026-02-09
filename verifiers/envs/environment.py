@@ -845,6 +845,7 @@ class Environment(ABC):
         sampling_args: SamplingArgs,
         max_retries: int = 0,
         state_columns: list[str] | None = None,
+        env_client: EnvClient | None = None,
     ) -> RolloutOutput:
         """Generate and, optionally, score a rollout."""
 
@@ -852,12 +853,13 @@ class Environment(ABC):
         if isinstance(client, ClientConfig):
             resolved_client_config = resolve_client_config(client)
 
-        if self.env_client is not None:  # in server mode
+        env_client = env_client or self.env_client
+        if env_client is not None:  # in server mode
             if resolved_client_config is None:
                 raise ValueError(
                     f"client must be have type ClientConfig in server mode, got {type(client)}"
                 )
-            return await self.env_client.run_rollout(
+            return await env_client.run_rollout(
                 input,
                 resolved_client_config,
                 model,
@@ -901,6 +903,7 @@ class Environment(ABC):
         sampling_args: SamplingArgs,
         max_retries: int = 0,
         state_columns: list[str] | None = None,
+        env_client: EnvClient | None = None,
         **kwargs,
     ) -> list[RolloutOutput]:
         """Generate and, optionally, score one group."""
@@ -909,12 +912,13 @@ class Environment(ABC):
         if isinstance(client, ClientConfig):
             resolved_client_config = resolve_client_config(client)
 
-        if self.env_client is not None:  # in server mode
+        env_client = env_client or self.env_client
+        if env_client is not None:  # in server mode
             if resolved_client_config is None:
                 raise ValueError(
                     f"client must be have type ClientConfig in server mode, got {type(client)}"
                 )
-            return await self.env_client.run_group(
+            return await env_client.run_group(
                 group_inputs,
                 resolved_client_config,
                 model,
@@ -1400,6 +1404,7 @@ class Environment(ABC):
         extra_env_kwargs: dict[str, Any] = {},
         log_level: str | None = None,
         log_file: str | None = None,
+        log_file_level: str | None = None,
         startup_timeout: float = 3600,  # 1h
     ) -> None:
         """Start a ZMQ server process for this environment.
@@ -1417,6 +1422,7 @@ class Environment(ABC):
                 extra_env_kwargs,
                 log_level,
                 log_file,
+                log_file_level,
             ),
             kwargs=dict(address=address),
             daemon=True,  # ensure server process is terminated when parent exits
