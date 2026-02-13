@@ -24,9 +24,7 @@ from verifiers.envs.experimental.rlm_env import (
     RLMWorkerError,
     RLMWorkerRecoveryError,
     SubLLMEmptyModelResponseError,
-    LocalRLMReplSession,
 )
-import subprocess
 import verifiers as vf
 
 
@@ -70,6 +68,7 @@ def rlm_env() -> RLMEnv:
         max_iterations=10,
         max_output_length=1000,
         repl_language="python",
+        interception_url="http://test.invalid",
     )
 
 
@@ -89,6 +88,7 @@ def rlm_env_with_sub_tools() -> RLMEnv:
         sub_tools=[sample_tool, another_tool],
         sub_tool_max_turns=3,
         repl_language="python",
+        interception_url="http://test.invalid",
     )
 
 
@@ -100,6 +100,7 @@ def rlm_env_bash() -> RLMEnv:
         max_iterations=10,
         max_output_length=1000,
         repl_language="bash",
+        interception_url="http://test.invalid",
     )
 
 
@@ -223,8 +224,9 @@ class TestContextFilesystemSetup:
     @pytest.mark.asyncio
     async def test_setup_state_copies_context_dir(self, context_dir: Path):
         dataset = make_dataset({"context_dir": str(context_dir)})
-        env = build_env(dataset)
+        env = build_env(dataset, interception_url="http://test.invalid")
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {
@@ -252,8 +254,9 @@ class TestContextFilesystemSetup:
     @pytest.mark.asyncio
     async def test_setup_state_writes_builtin_context_json(self):
         dataset = make_dataset({"context": {"a": 1}})
-        env = build_env(dataset)
+        env = build_env(dataset, interception_url="http://test.invalid")
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {"context": {"a": 1}}, "model": "m", "client": MagicMock()}
@@ -270,8 +273,9 @@ class TestContextFilesystemSetup:
     @pytest.mark.asyncio
     async def test_setup_state_writes_builtin_context_text(self):
         dataset = make_dataset({"context": "hello"})
-        env = build_env(dataset)
+        env = build_env(dataset, interception_url="http://test.invalid")
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {"context": "hello"}, "model": "m", "client": MagicMock()}
@@ -296,8 +300,9 @@ class TestContextFilesystemSetup:
             pytest.skip("symlinks not supported on this platform")
 
         dataset = make_dataset({"context_dir": str(src)})
-        env = build_env(dataset)
+        env = build_env(dataset, interception_url="http://test.invalid")
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {"context_dir": str(src)}, "model": "m", "client": MagicMock()}
@@ -311,8 +316,11 @@ class TestContextFilesystemSetup:
         (src / "big.txt").write_bytes(b"0123456789")
 
         dataset = make_dataset({"context_dir": str(src)})
-        env = build_env(dataset, filesystem_copy_max_bytes=5)
+        env = build_env(
+            dataset, filesystem_copy_max_bytes=5, interception_url="http://test.invalid"
+        )
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {"context_dir": str(src)}, "model": "m", "client": MagicMock()}
@@ -322,8 +330,9 @@ class TestContextFilesystemSetup:
     @pytest.mark.asyncio
     async def test_setup_state_no_context_creates_empty_dir(self):
         dataset = make_dataset({})
-        env = build_env(dataset)
+        env = build_env(dataset, interception_url="http://test.invalid")
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {}, "model": "m", "client": MagicMock()}
@@ -339,8 +348,9 @@ class TestContextFilesystemSetup:
     @pytest.mark.asyncio
     async def test_system_prompt_mentions_working_dir_and_empty_context(self):
         dataset = make_dataset({})
-        env = build_env(dataset)
+        env = build_env(dataset, interception_url="http://test.invalid")
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {}, "model": "m", "client": MagicMock()}
@@ -358,8 +368,9 @@ class TestFilesystemCleanup:
     @pytest.mark.asyncio
     async def test_cleanup_removes_filesystem_by_default(self, tmp_path: Path):
         dataset = make_dataset({"context": "hello"})
-        env = build_env(dataset)
+        env = build_env(dataset, interception_url="http://test.invalid")
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {"context": "hello"}, "model": "m", "client": MagicMock()}
@@ -373,8 +384,13 @@ class TestFilesystemCleanup:
     @pytest.mark.asyncio
     async def test_cleanup_keeps_filesystem_when_configured(self):
         dataset = make_dataset({"context": "hello"})
-        env = build_env(dataset, retain_filesystem_after_rollout=True)
+        env = build_env(
+            dataset,
+            retain_filesystem_after_rollout=True,
+            interception_url="http://test.invalid",
+        )
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {"context": "hello"}, "model": "m", "client": MagicMock()}
@@ -394,6 +410,7 @@ class TestBashPrompt:
     async def test_bash_prompt_mentions_env_vars(self, rlm_env_bash):
         env = rlm_env_bash
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {}, "model": "m", "client": MagicMock()}
@@ -447,9 +464,13 @@ class TestPromptVerbosity:
     ):
         dataset = make_dataset({})
         env = build_env(
-            dataset, repl_language="python", root_prompt_verbosity=verbosity
+            dataset,
+            repl_language="python",
+            root_prompt_verbosity=verbosity,
+            interception_url="http://test.invalid",
         )
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {}, "model": "m", "client": MagicMock()}
@@ -562,7 +583,7 @@ class TestBashWorkerScript:
             log_file=str(tmp_path / "worker.log"),
         )
         script = rlm_module._render_worker_script(paths, repl_language="bash")
-        assert '"$?"' in script
+        assert "$?" in script
         assert "__RLM_ENV__" in script
 
 
@@ -890,9 +911,14 @@ class TestToolSplitConfiguration:
 
         dataset = make_dataset({})
         env = build_env(
-            dataset, tools=[shared_tool], root_tools=[root_tool], sub_tools=[sub_tool]
+            dataset,
+            tools=[shared_tool],
+            root_tools=[root_tool],
+            sub_tools=[sub_tool],
+            interception_url="http://test.invalid",
         )
         env._ensure_interception_server = AsyncMock()
+        env._executor.prepare_filesystem = AsyncMock()
         env._executor.setup = AsyncMock()
 
         state = {"info": {}, "model": "test-model", "client": MagicMock()}
@@ -1499,112 +1525,17 @@ class TestExceptionHierarchy:
 class TestRLMSessionErrorRaised:
     """Test that RLMSessionError is raised when sessions/sandboxes are not initialized."""
 
-    def test_local_get_session_missing_rollout_id(self, rlm_env):
+    def test_get_session_missing_rollout_id(self, rlm_env):
         executor = rlm_env._executor
         state = {}
-        with pytest.raises(RLMSessionError, match="Local session not initialized"):
+        with pytest.raises(RLMSessionError, match="Sandbox session not initialized"):
             executor._get_session(state)
 
-    def test_local_get_session_unknown_rollout_id(self, rlm_env):
+    def test_get_session_unknown_rollout_id(self, rlm_env):
         executor = rlm_env._executor
         state = {"rollout_id": "nonexistent"}
-        with pytest.raises(RLMSessionError, match="Local session not initialized"):
+        with pytest.raises(RLMSessionError, match="Sandbox session not initialized"):
             executor._get_session(state)
-
-    @pytest.mark.asyncio
-    async def test_local_start_worker_no_venv(self, rlm_env):
-        executor = rlm_env._executor
-        session = LocalRLMReplSession(
-            rollout_id="test",
-            rollout_dir="/tmp/test",
-            paths=MagicMock(),
-            fs_root="/tmp/test/fs",
-            control_dir="/tmp/test/control",
-            venv_path=None,
-        )
-        state = {}
-        with pytest.raises(RLMSessionError, match="Local venv not initialized"):
-            await executor._start_worker(state, session)
-
-
-class TestRLMWorkerErrorRaised:
-    """Test that RLMWorkerError is raised when the worker is not running."""
-
-    @pytest.mark.asyncio
-    async def test_local_execute_worker_process_none(self, rlm_env):
-        executor = rlm_env._executor
-        session = LocalRLMReplSession(
-            rollout_id="test",
-            rollout_dir="/tmp/test",
-            paths=MagicMock(),
-            fs_root="/tmp/test/fs",
-            control_dir="/tmp/test/control",
-            worker_process=None,
-        )
-        executor._sessions["test"] = session
-        state = {"rollout_id": "test"}
-        try:
-            with pytest.raises(RLMWorkerError, match="RLM worker process not running"):
-                await executor.execute({"code": "1+1", "seq": 1}, state)
-        finally:
-            executor._sessions.pop("test", None)
-
-    @pytest.mark.asyncio
-    async def test_local_execute_worker_process_exited(self, rlm_env):
-        executor = rlm_env._executor
-        mock_process = MagicMock()
-        mock_process.poll.return_value = 1  # process exited
-        session = LocalRLMReplSession(
-            rollout_id="test",
-            rollout_dir="/tmp/test",
-            paths=MagicMock(),
-            fs_root="/tmp/test/fs",
-            control_dir="/tmp/test/control",
-            worker_process=mock_process,
-        )
-        executor._sessions["test"] = session
-        state = {"rollout_id": "test"}
-        try:
-            with pytest.raises(RLMWorkerError, match="RLM worker process not running"):
-                await executor.execute({"code": "1+1", "seq": 1}, state)
-        finally:
-            executor._sessions.pop("test", None)
-
-
-class TestRLMSetupErrorRaised:
-    """Test that RLMSetupError is raised on setup failures."""
-
-    @pytest.mark.asyncio
-    async def test_uv_not_found(self, rlm_env):
-        executor = rlm_env._executor
-        with patch(
-            "asyncio.to_thread", new=AsyncMock(side_effect=FileNotFoundError("uv"))
-        ):
-            with pytest.raises(RLMSetupError, match="uv not found on PATH"):
-                await executor._run_uv_command(["uv", "venv", "/tmp/test"], timeout=30)
-
-    @pytest.mark.asyncio
-    async def test_uv_command_timeout(self, rlm_env):
-        executor = rlm_env._executor
-        with patch(
-            "asyncio.to_thread",
-            new=AsyncMock(side_effect=subprocess.TimeoutExpired("uv", 30)),
-        ):
-            with pytest.raises(RLMSetupError, match="uv command timed out"):
-                await executor._run_uv_command(["uv", "venv", "/tmp/test"], timeout=30)
-
-    @pytest.mark.asyncio
-    async def test_uv_command_nonzero_exit(self, rlm_env):
-        executor = rlm_env._executor
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = "some error"
-        mock_result.stdout = ""
-        with patch("asyncio.to_thread", new=AsyncMock(return_value=mock_result)):
-            with pytest.raises(RLMSetupError, match="uv command failed"):
-                await executor._run_uv_command(
-                    ["uv", "pip", "install", "foo"], timeout=30
-                )
 
 
 class TestRLMCodeExecutionTimeoutHandling:
